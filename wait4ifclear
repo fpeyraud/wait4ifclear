@@ -1,0 +1,111 @@
+#!/bin/bash
+# wait4ifclear
+# by Florent (flow) Peyraud 2013
+# Licensed under GNU GPL v2
+
+POLL_TIMEOUT=300
+DEBOUNCE=10
+THRESHOLD=0
+VERBOSE=0
+QUIET=0
+
+RED="\e[31m"
+ORANGE="\e[33m"
+GREEN="\e[32m"
+RAZ="\e[0m"
+
+usage()
+{
+cat << EOF
+usage: $(basename $0) [options] IF
+
+OPTIONS :
+  -t TIMEOUT
+     timeout of the wait period, defaults to 300 seconds
+     enter 0 to wait forever
+  -d DEBOUCE
+     Wait for this period during witch the trafic must
+     stay under the threshold, defaults to 10 seconds
+     0 disables disables debounce
+  -l THRESHOLD
+     The rate in byte/s underwitch the IF is considered
+     inactive. Defaults to 0 (really inactive)
+  -h displays this help
+  -v displays extra debug information during polling time
+EOF
+}
+
+vprint()
+{
+  [ "$VERBOSE" -ge 1 ] && echo -e "[INFO] $@"
+}
+
+eprint()
+{
+  [ "$QUIET" -ge 1 ] || echo "[ERROR] $@"
+}
+
+while getopts "hvqt:d:l:" OPTION
+do
+  case $OPTION in
+    h)
+      usage
+      exit 1
+      ;;
+    t)
+      POLL_TIMEOUT=$OPTARG
+      ;;
+    d)
+      DEBOUNCE=$OPTARG
+      ;;
+    l)
+      THRESHOLD=$OPTARG
+      ;;
+    v)
+      VERBOSE=1
+      ;;
+    q)
+      QUIET=1
+      ;;
+    ?)
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+shift $((OPTIND-1))
+if [ $# -ne 1 ]; then
+  eprint Invalid number of parameters
+  usage
+  exit 2
+fi
+
+IF=$1
+
+if [ ! -d /sys/class/net/${IF} ]; then
+  eprint Invalid Interface ${IF}
+  exit 2
+fi
+
+echo $IF
+
+OLDRATE=0
+CONTINUE=true
+CNT=0
+TCNT=0
+while $CONTINUE; do 
+  sleep 1
+  TCNT=$(($TCNT+1))
+  [ $POLL_TIMEOUT -gt 0 -a $TCNT -ge $POLL_TIMEOUT ] && exit 1
+  NEWRATE=$(cat /sys/class/net/$IF/statistics/rx_bytes)
+  DELTA=$(($NEWRATE-$OLDRATE))
+  COLOR=$RED
+  [ $DELTA -lt $THRESHOLD ] && COLOR=$ORANGE
+  [ $DELTA -lt $THRESHOLD -a $CNT -ge $(($DEBOUNCE-1)) ] && COLOR=$GREEN
+  vprint ${COLOR}${DELTA}${RAZ}
+  [ $DELTA -le $THRESHOLD ] && CNT=$(($CNT+1)) || CNT=0
+  [ $DELTA -le $THRESHOLD -a $CNT -ge $DEBOUNCE ] && CONTINUE=false
+  OLDRATE=$NEWRATE
+done
+exit 0
